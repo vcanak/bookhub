@@ -1,0 +1,66 @@
+# Keep the build context small and free of host-only / secret artifacts.
+# Anything that is not needed to install dependencies or run the app belongs
+# here. The Dockerfile only COPYs pyproject.toml, app/, alembic/, alembic.ini
+# and docker/entrypoint.sh, so this is mostly defense-in-depth plus faster
+# context uploads.
+
+# --- Python virtualenvs / caches ------------------------------------------
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.egg-info/
+build/
+dist/
+
+# --- Version control / CI --------------------------------------------------
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# --- Tests (not needed in the runtime image) ------------------------------
+tests/
+
+# --- Deployment manifests built/consumed outside the image ----------------
+k8s/
+helm/
+docker-compose.yml
+docker-compose.*.yml
+docker/prometheus.yml
+
+# --- Secrets / local environment ------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Editor / OS cruft -----------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Docs (kept out of the image; README.md is regenerated as a placeholder
+#     inside the builder stage to satisfy pyproject's `readme` field) -------
+*.md
+docs/
+
+# --- Misc ------------------------------------------------------------------
+*.log
+tmp/
+.tmp/

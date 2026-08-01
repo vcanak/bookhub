@@ -1,0 +1,83 @@
+# ===========================================================================
+# Celery beat — Deployment (scheduler).
+#
+# Runs:  celery -A app.worker.celery_app.celery_app beat --loglevel=info
+# Overrides the image's default gunicorn CMD via `command`.
+#
+# Beat dispatches periodic tasks (see celery_app.conf.beat_schedule, e.g. the
+# heartbeat-every-5-minutes task). It MUST run as a single replica — multiple
+# schedulers would emit duplicate periodic tasks. Recreate strategy guarantees
+# the old pod is gone before a new one starts.
+# ===========================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-starter-beat
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: beat
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  # Exactly one scheduler — never scale this above 1.
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-starter
+      app.kubernetes.io/instance: fastapi-starter
+      app.kubernetes.io/component: beat
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fastapi-starter
+        app.kubernetes.io/instance: fastapi-starter
+        app.kubernetes.io/component: beat
+        app.kubernetes.io/part-of: fastapi-starter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: beat
+          image: ghcr.io/your-org/fastapi-starter:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - app.worker.celery_app.celery_app
+            - beat
+            - --loglevel=info
+            # Keep the schedule DB on writable scratch (rootfs is read-only).
+            - --schedule=/tmp/celerybeat-schedule
+          envFrom:
+            - configMapRef:
+                name: fastapi-starter-config
+            - secretRef:
+                name: fastapi-starter-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

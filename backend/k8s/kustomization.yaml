@@ -1,0 +1,52 @@
+# ===========================================================================
+# Kustomization — full apply-able set for the FastAPI Starter.
+#
+# Apply everything:
+#   kubectl apply -k k8s/
+#
+# Recommended order for a first deploy with raw kubectl (kustomize applies all
+# at once; these notes are for understanding the dependency graph):
+#   1. namespace, configmap, secret
+#   2. postgres, redis
+#   3. migration-job   (alembic upgrade head — wait for it to Complete)
+#   4. deployment, service, worker, beat
+#   5. ingress, hpa, pdb, servicemonitor
+#
+# REMINDER: edit secret.yaml (SECRET_KEY, POSTGRES_PASSWORD) before applying to
+# anything other than a throwaway cluster.
+# ===========================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: fastapi-starter
+
+# Apply shared labels to metadata only. `includeSelectors: false` is important:
+# Deployment/Service selectors are immutable once created, and each raw file
+# already declares its own complete selector — kustomize must not inject extra
+# match labels into them or future `kubectl apply` would fail.
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - postgres.yaml
+  - redis.yaml
+  - migration-job.yaml
+  - deployment.yaml
+  - service.yaml
+  - worker-deployment.yaml
+  - beat-deployment.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  # Requires the Prometheus Operator CRDs (monitoring.coreos.com/v1). Comment
+  # this out if the Operator is not installed in your cluster.
+  - servicemonitor.yaml
+
+images:
+  - name: ghcr.io/your-org/fastapi-starter
+    newTag: latest

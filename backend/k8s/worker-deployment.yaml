@@ -1,0 +1,101 @@
+# ===========================================================================
+# Celery worker — Deployment.
+#
+# Runs:  celery -A app.worker.celery_app.celery_app worker --loglevel=info
+# Overrides the image's default gunicorn CMD via `command`.
+#
+# Workers have no inbound ports and no HTTP probes (Celery is a pull-based
+# consumer). Liveness is approximated with `celery inspect ping`, which
+# confirms the worker can reach the broker and respond. Shares the same
+# ConfigMap + Secret as the API so broker/backend/DB config is identical.
+# ===========================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-starter-worker
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-starter
+      app.kubernetes.io/instance: fastapi-starter
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fastapi-starter
+        app.kubernetes.io/instance: fastapi-starter
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: fastapi-starter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Allow in-flight tasks to finish (task_acks_late=True) before SIGKILL.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/fastapi-starter:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - app.worker.celery_app.celery_app
+            - worker
+            - --loglevel=info
+            - --concurrency=4
+          envFrom:
+            - configMapRef:
+                name: fastapi-starter-config
+            - secretRef:
+                name: fastapi-starter-secret
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A app.worker.celery_app.celery_app inspect ping -d "celery@$HOSTNAME" --timeout 10
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A app.worker.celery_app.celery_app inspect ping -d "celery@$HOSTNAME" --timeout 10
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

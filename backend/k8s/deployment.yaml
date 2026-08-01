@@ -1,0 +1,165 @@
+# ===========================================================================
+# API — FastAPI application Deployment.
+#
+# Image           : ghcr.io/your-org/fastapi-starter:latest
+# Server          : gunicorn app.main:app -k uvicorn.workers.UvicornWorker
+#                   (the image's default CMD; see docker/Dockerfile)
+# Container port  : 8000
+# Liveness        : GET /api/v1/health/live   (never touches DB/Redis)
+# Readiness       : GET /api/v1/health/ready   (returns 503 if DB/Redis down)
+# Metrics         : GET /metrics              (scraped via pod annotations)
+#
+# Schema migrations are applied by the dedicated migration-job.yaml (run once
+# per release). As an extra safety net, an initContainer below blocks startup
+# until Postgres accepts connections, so the app never boots against a DB that
+# is not yet reachable. See migration-job.yaml for `alembic upgrade head`.
+# ===========================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-starter-api
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-starter
+      app.kubernetes.io/instance: fastapi-starter
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fastapi-starter
+        app.kubernetes.io/instance: fastapi-starter
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: fastapi-starter
+      annotations:
+        # Prometheus pod-level scrape config (for a plain Prometheus install
+        # using kubernetes_sd_configs pod discovery). If you run the Prometheus
+        # Operator, prefer the ServiceMonitor in servicemonitor.yaml instead.
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8000"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # Matches the appuser created in docker/Dockerfile (uid/gid 1000).
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Block app startup until the database is reachable. The migration Job is
+      # the source of truth for schema changes; this just avoids crash-looping
+      # before the DB Service has DNS / is accepting connections.
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for postgres at ${POSTGRES_SERVER}:${POSTGRES_PORT}..."
+              until pg_isready -h "$POSTGRES_SERVER" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
+                echo "postgres not ready yet; sleeping 2s"
+                sleep 2
+              done
+              echo "postgres is ready."
+          env:
+            - name: POSTGRES_SERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: fastapi-starter-config
+                  key: POSTGRES_SERVER
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: fastapi-starter-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-starter-secret
+                  key: POSTGRES_USER
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      containers:
+        - name: api
+          image: ghcr.io/your-org/fastapi-starter:latest
+          imagePullPolicy: IfNotPresent
+          # Use the image's default ENTRYPOINT + CMD:
+          #   gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: fastapi-starter-config
+            - secretRef:
+                name: fastapi-starter-secret
+          startupProbe:
+            # Give the app time to boot before liveness/readiness take over.
+            # Tolerates up to ~60s of startup (12 * 5s).
+            httpGet:
+              path: /api/v1/health/live
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health/live
+              port: 8000
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health/ready
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            # The image runs read-only; provide writable scratch space for any
+            # temp files (gunicorn worker tmp, etc.).
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

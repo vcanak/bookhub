@@ -1,0 +1,313 @@
+# Default values for fastapi-starter.
+# This is a YAML-formatted file. Values are merged with `--set` / `-f` overrides.
+#
+# The chart deploys three workloads from a single image:
+#   * api    — the ASGI app (gunicorn + uvicorn workers) on port 8000
+#   * worker — a Celery worker
+#   * beat   — a Celery beat scheduler
+# plus optional: an Alembic migration Job (pre-install/pre-upgrade hook),
+# a HorizontalPodAutoscaler, an Ingress, and a Prometheus ServiceMonitor.
+
+# -- Number of API replicas. Ignored when autoscaling.enabled is true.
+replicaCount: 2
+
+image:
+  # -- Container image repository. Build from the project Dockerfile.
+  repository: ghcr.io/your-org/fastapi-starter
+  # -- Image tag. Defaults to the chart appVersion when left empty.
+  tag: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Secrets for pulling the image from a private registry.
+imagePullSecrets: []
+#  - name: regcred
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the fully qualified app name used in resource names.
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Whether to create a ServiceAccount.
+  create: true
+  # -- Annotations to add to the ServiceAccount (e.g. IRSA / Workload Identity).
+  annotations: {}
+  # -- Name of the ServiceAccount. Generated from fullname when empty.
+  name: ""
+
+# -- Extra annotations applied to every pod.
+podAnnotations: {}
+# -- Extra labels applied to every pod.
+podLabels: {}
+
+# -- Pod-level security context (applied to all workloads).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level security context (applied to all workloads).
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# ---------------------------------------------------------------------------
+# API workload (the FastAPI ASGI server).
+# ---------------------------------------------------------------------------
+api:
+  # -- Number of gunicorn workers (-w). Tune to CPU allotment.
+  workers: 4
+  # -- Container command. Overrides the image entrypoint if your image differs.
+  command:
+    - gunicorn
+    - app.main:app
+    - -k
+    - uvicorn.workers.UvicornWorker
+  # -- Extra args appended after the command (worker count + bind injected by template).
+  extraArgs: []
+  # -- Resource requests/limits for API pods.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # -- Liveness probe tuning (path/port are fixed to /api/v1/health/live : 8000).
+  livenessProbe:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # -- Readiness probe tuning (path/port are fixed to /api/v1/health/ready : 8000).
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  # -- Node selector / affinity / tolerations for API pods.
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+
+# ---------------------------------------------------------------------------
+# Celery worker workload.
+# ---------------------------------------------------------------------------
+worker:
+  # -- Deploy the Celery worker.
+  enabled: true
+  # -- Number of worker pod replicas.
+  replicaCount: 1
+  # -- Concurrency (--concurrency) per worker pod.
+  concurrency: 4
+  command:
+    - celery
+    - -A
+    - app.worker.celery_app.celery_app
+    - worker
+    - --loglevel=info
+  extraArgs: []
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+
+# ---------------------------------------------------------------------------
+# Celery beat workload (scheduler). Keep replicaCount at 1 to avoid duplicates.
+# ---------------------------------------------------------------------------
+beat:
+  # -- Deploy the Celery beat scheduler.
+  enabled: true
+  command:
+    - celery
+    - -A
+    - app.worker.celery_app.celery_app
+    - beat
+    - --loglevel=info
+  extraArgs: []
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+
+# ---------------------------------------------------------------------------
+# Service (exposes the API on port 8000).
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  # -- Service port (the app always listens on container port 8000).
+  port: 8000
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Ingress.
+# ---------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  #  nginx.ingress.kubernetes.io/proxy-body-size: 10m
+  host: fastapi.example.com
+  # -- Path that routes to the API service.
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: fastapi-starter-tls
+
+# ---------------------------------------------------------------------------
+# Horizontal Pod Autoscaler for the API deployment.
+# When enabled, the API Deployment omits a static replica count.
+# ---------------------------------------------------------------------------
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # -- Optional memory target. Leave empty to disable the memory metric.
+  targetMemoryUtilizationPercentage: ""
+
+# ---------------------------------------------------------------------------
+# Alembic migration job (runs `alembic upgrade head` as a Helm hook before
+# install/upgrade).
+# ---------------------------------------------------------------------------
+migrations:
+  enabled: true
+  command:
+    - alembic
+    - upgrade
+    - head
+  # -- Backoff limit for the migration Job.
+  backoffLimit: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# ---------------------------------------------------------------------------
+# Prometheus ServiceMonitor (requires the prometheus-operator CRDs).
+# ---------------------------------------------------------------------------
+serviceMonitor:
+  enabled: false
+  # -- Scrape path. The app exposes Prometheus metrics at /metrics.
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: 10s
+  # -- Extra labels so a Prometheus instance selects this ServiceMonitor.
+  labels: {}
+  namespace: ""
+
+# ---------------------------------------------------------------------------
+# Non-secret application configuration. Rendered into a ConfigMap and exposed
+# to every pod via envFrom. Env var names match app/core/config.py EXACTLY.
+# ---------------------------------------------------------------------------
+config:
+  PROJECT_NAME: "FastAPI Starter"
+  VERSION: "0.1.0"
+  DESCRIPTION: "Production-grade FastAPI starter."
+  API_V1_PREFIX: "/api/v1"
+  # One of: local | development | staging | production | test
+  ENVIRONMENT: "production"
+  DEBUG: "false"
+
+  LOG_LEVEL: "INFO"
+  LOG_JSON: "true"
+
+  ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  REFRESH_TOKEN_EXPIRE_DAYS: "7"
+  # Comma-separated list of allowed CORS origins, e.g. "https://app.example.com".
+  BACKEND_CORS_ORIGINS: ""
+
+  # Database connection pool tuning. POSTGRES_* host/port/user/db come from the
+  # `postgres` section below; POSTGRES_PASSWORD comes from the secret.
+  DB_POOL_SIZE: "10"
+  DB_MAX_OVERFLOW: "20"
+  DB_ECHO: "false"
+
+  # Redis DB index. REDIS_HOST / REDIS_PORT come from the `redis` section below.
+  REDIS_DB: "0"
+
+  # Celery broker/result backend. Leave empty to fall back to the Redis URL.
+  CELERY_BROKER_URL: ""
+  CELERY_RESULT_BACKEND: ""
+
+  RATE_LIMIT_ENABLED: "true"
+  RATE_LIMIT_DEFAULT: "200/minute"
+  METRICS_ENABLED: "true"
+
+# ---------------------------------------------------------------------------
+# Secrets. Rendered into a Kubernetes Secret (base64-encoded) and exposed via
+# envFrom. Override these for any non-local environment.
+#
+# SECRET_KEY MUST be >= 32 chars and a strong value in production, or the app
+# refuses to start. Generate one with:
+#   python -c 'import secrets; print(secrets.token_urlsafe(48))'
+# ---------------------------------------------------------------------------
+secrets:
+  # -- JWT signing key (env: SECRET_KEY).
+  secretKey: "CHANGE_ME_insecure_dev_secret_key_minimum_32_chars_long"
+  # -- Database password (env: POSTGRES_PASSWORD).
+  postgresPassword: "postgres"
+  # -- Optional Redis password (env: REDIS_PASSWORD). Leave empty for no auth.
+  redisPassword: ""
+  # -- Optional bootstrap superuser (env: FIRST_SUPERUSER_EMAIL / FIRST_SUPERUSER_PASSWORD).
+  firstSuperuserEmail: ""
+  firstSuperuserPassword: ""
+  # -- Use an EXISTING secret instead of creating one from the values above.
+  #    The existing secret must define the same keys (SECRET_KEY, POSTGRES_PASSWORD, ...).
+  existingSecret: ""
+
+# ---------------------------------------------------------------------------
+# External PostgreSQL connection (env: POSTGRES_SERVER / POSTGRES_PORT /
+# POSTGRES_USER / POSTGRES_DB). The password is supplied via the Secret.
+# ---------------------------------------------------------------------------
+postgres:
+  host: postgresql
+  port: 5432
+  user: postgres
+  db: app
+
+# ---------------------------------------------------------------------------
+# External Redis connection (env: REDIS_HOST / REDIS_PORT).
+# ---------------------------------------------------------------------------
+redis:
+  host: redis-master
+  port: 6379
+
+# -- Extra environment variables applied to all workloads (list of name/value
+#    or name/valueFrom maps).
+extraEnv: []
+#  - name: SENTRY_DSN
+#    value: "https://example@sentry.io/1"
+
+# -- Extra volumes (e.g. a writable tmp dir when readOnlyRootFilesystem is true).
+extraVolumes:
+  - name: tmp
+    emptyDir: {}
+# -- Extra volume mounts applied to all workloads.
+extraVolumeMounts:
+  - name: tmp
+    mountPath: /tmp

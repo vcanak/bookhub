@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "fastapi-starter.fullname" . }}
+  labels:
+    {{- include "fastapi-starter.labels" . | nindent 4 }}
+data:
+  # --- Non-secret application config (env var names match app/core/config.py) ---
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  # --- Connection coordinates for external Postgres / Redis -------------------
+  POSTGRES_SERVER: {{ .Values.postgres.host | quote }}
+  POSTGRES_PORT: {{ .Values.postgres.port | quote }}
+  POSTGRES_USER: {{ .Values.postgres.user | quote }}
+  POSTGRES_DB: {{ .Values.postgres.db | quote }}
+  REDIS_HOST: {{ .Values.redis.host | quote }}
+  REDIS_PORT: {{ .Values.redis.port | quote }}

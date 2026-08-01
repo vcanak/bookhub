@@ -1,0 +1,28 @@
+# ===========================================================================
+# API — ClusterIP Service.
+#
+# Exposes the FastAPI Deployment inside the cluster on port 80, forwarding to
+# the container's port 8000 (named "http"). The Ingress (ingress.yaml) routes
+# external traffic to this Service.
+# ===========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-starter-api
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

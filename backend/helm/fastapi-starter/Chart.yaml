@@ -1,0 +1,42 @@
+apiVersion: v2
+name: fastapi-starter
+description: Production-grade FastAPI starter with PostgreSQL, Redis, Celery, JWT auth, and full observability.
+type: application
+
+# Chart version — bump on every change to chart templates/values.
+version: 0.1.0
+
+# Version of the application packaged by this chart (matches app VERSION / image tag default).
+appVersion: "0.1.0"
+
+home: https://github.com/your-org/fastapi-starter
+sources:
+  - https://github.com/your-org/fastapi-starter
+keywords:
+  - fastapi
+  - python
+  - postgresql
+  - redis
+  - celery
+maintainers:
+  - name: FastAPI Starter Contributors
+
+# NOTE: This chart intentionally declares NO required subchart dependencies so it
+# renders and lints with `helm lint` / `helm template` WITHOUT any
+# `helm dependency build` / network access. PostgreSQL and Redis are expected to
+# be provided externally (managed services or pre-existing in-cluster releases)
+# and are referenced via `.Values.postgres.*` / `.Values.redis.*`.
+#
+# If you DO want to provision Postgres/Redis from this chart, add the Bitnami
+# subcharts below and run `helm dependency build`, then point
+# `postgres.host` / `redis.host` at the rendered service names:
+#
+# dependencies:
+#   - name: postgresql
+#     version: "~16.0.0"
+#     repository: https://charts.bitnami.com/bitnami
+#     condition: postgresql.enabled
+#   - name: redis
+#     version: "~20.0.0"
+#     repository: https://charts.bitnami.com/bitnami
+#     condition: redis.enabled

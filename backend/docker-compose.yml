@@ -1,0 +1,197 @@
+# Docker Compose stack for the FastAPI Starter.
+#
+# Brings up the full application: API server, Celery worker + beat scheduler,
+# PostgreSQL, Redis and Prometheus. The api/worker/beat services all share the
+# same image (built once) and differ only in their `command:`.
+#
+# Quick start:
+#   cp .env.example .env   # then edit secrets
+#   docker compose up --build
+#
+# Service URLs:
+#   API / Swagger : http://localhost:8000/docs
+#   Metrics       : http://localhost:8000/metrics
+#   Prometheus    : http://localhost:9090
+#
+# Environment variable names are the EXACT settings keys from
+# app/core/config.py. Defaults wire the services together on the `backend`
+# network (POSTGRES_SERVER=postgres, REDIS_HOST=redis); values in .env override
+# these per the order listed under each service.
+
+# -----------------------------------------------------------------------------
+# Reusable anchors
+# -----------------------------------------------------------------------------
+x-app-build: &app-build
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+
+# Connection settings that point the app at the in-network postgres/redis.
+# These are listed AFTER `env_file`, so a value in .env takes precedence only
+# if you remove it here; keeping them here guarantees correct service wiring.
+x-app-env: &app-env
+  POSTGRES_SERVER: postgres
+  POSTGRES_PORT: "5432"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+
+x-app-depends: &app-depends
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+services:
+  # ---------------------------------------------------------------------------
+  # API — FastAPI served by gunicorn/uvicorn workers (image default CMD).
+  # ---------------------------------------------------------------------------
+  api:
+    <<: *app-build
+    image: fastapi-starter:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      <<: *app-env
+      # The API owns schema migrations; worker/beat skip them to avoid races.
+      RUN_MIGRATIONS: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      <<: *app-depends
+    networks:
+      - backend
+    # Image CMD already runs:
+    #   gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
+    # For local hot-reload development, override with the dev server instead:
+    #   command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # ---------------------------------------------------------------------------
+  # Celery worker — processes background tasks.
+  # ---------------------------------------------------------------------------
+  worker:
+    <<: *app-build
+    image: fastapi-starter:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS: "false"
+    depends_on:
+      <<: *app-depends
+      api:
+        condition: service_started
+    networks:
+      - backend
+    command:
+      - "celery"
+      - "-A"
+      - "app.worker.celery_app.celery_app"
+      - "worker"
+      - "--loglevel=info"
+
+  # ---------------------------------------------------------------------------
+  # Celery beat — periodic task scheduler (single replica).
+  # ---------------------------------------------------------------------------
+  beat:
+    <<: *app-build
+    image: fastapi-starter:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS: "false"
+    depends_on:
+      <<: *app-depends
+      api:
+        condition: service_started
+    networks:
+      - backend
+    command:
+      - "celery"
+      - "-A"
+      - "app.worker.celery_app.celery_app"
+      - "beat"
+      - "--loglevel=info"
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 16
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      # These map to the libpq/initdb variables the official image reads.
+      # Defaults mirror app/core/config.py; .env overrides them.
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+      POSTGRES_DB: "${POSTGRES_DB:-app}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-app}"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - backend
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 — Celery broker/backend + rate-limit storage.
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - backend
+
+  # ---------------------------------------------------------------------------
+  # Prometheus — scrapes the API's /metrics endpoint.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheusdata:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - backend
+
+# -----------------------------------------------------------------------------
+# Networks & volumes
+# -----------------------------------------------------------------------------
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  prometheusdata:

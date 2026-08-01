@@ -1,0 +1,29 @@
+# Prometheus scrape configuration for the FastAPI Starter stack.
+#
+# Mounted into the prometheus container at /etc/prometheus/prometheus.yml
+# (see docker-compose.yml). The API exposes metrics via
+# prometheus-fastapi-instrumentator at GET /metrics on port 8000.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: "fastapi-starter"
+
+scrape_configs:
+  # FastAPI application metrics.
+  - job_name: "fastapi"
+    metrics_path: /metrics
+    scheme: http
+    scrape_interval: 15s
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          service: "fastapi-starter-api"
+
+  # Prometheus self-monitoring.
+  - job_name: "prometheus"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["localhost:9090"]

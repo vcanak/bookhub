@@ -1,0 +1,43 @@
+# ===========================================================================
+# ServiceMonitor — Prometheus Operator.
+#
+# Tells the Prometheus Operator to scrape the API's /metrics endpoint (exposed
+# by prometheus-fastapi-instrumentator) via the fastapi-starter-api Service.
+#
+# REQUIRES the Prometheus Operator CRDs to be installed in the cluster
+# (monitoring.coreos.com/v1). Without the Operator this resource cannot be
+# applied — in that case rely on the prometheus.io/* pod annotations on the API
+# Deployment instead.
+#
+# The Prometheus instance that should pick this up must select this namespace
+# and these labels in its `serviceMonitorSelector` / `serviceMonitorNamespace
+# Selector`. The `release` label is the conventional selector for the
+# kube-prometheus-stack Helm chart — adjust to match your install.
+# ===========================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fastapi-starter-api
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fastapi-starter
+    # Common selector label for kube-prometheus-stack; change to your release.
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - fastapi-starter
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-starter
+      app.kubernetes.io/instance: fastapi-starter
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http            # named port on the fastapi-starter-api Service
+      path: /metrics
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s

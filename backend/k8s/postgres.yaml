@@ -1,0 +1,149 @@
+# ===========================================================================
+# PostgreSQL — StatefulSet + headless Service.
+#
+# Uses postgres:16-alpine. POSTGRES_USER / POSTGRES_PASSWORD are sourced from
+# the shared application Secret (fastapi-starter-secret); POSTGRES_DB matches
+# the value in the application ConfigMap so the API connects to the same DB.
+#
+# The headless Service is named "postgres" to match POSTGRES_SERVER in the
+# ConfigMap. For a single-node demo this provides a stable DNS name; the
+# StatefulSet keeps the data volume bound across reschedules.
+#
+# NOTE: This is a self-managed, in-cluster database suitable for dev/demo. For
+# production you should strongly prefer a managed database (RDS / Cloud SQL /
+# Azure DB) or a dedicated operator (CloudNativePG, Zalando, Crunchy).
+# ===========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  # Headless service: stable network identity for the StatefulSet pod(s).
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: database
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+      app.kubernetes.io/instance: fastapi-starter
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/instance: fastapi-starter
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: fastapi-starter
+    spec:
+      securityContext:
+        # postgres:16-alpine runs as uid 70 (postgres). Ensure the mounted
+        # volume is group-writable by that user.
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-starter-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-starter-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: fastapi-starter-config
+                  key: POSTGRES_DB
+            # Keep data in a subdirectory so lost+found on some volume types
+            # does not break initdb.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app.kubernetes.io/name: postgres
+          app.kubernetes.io/instance: fastapi-starter
+          app.kubernetes.io/component: database
+          app.kubernetes.io/part-of: fastapi-starter
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+        # storageClassName: ""  # set to your cluster's StorageClass if needed

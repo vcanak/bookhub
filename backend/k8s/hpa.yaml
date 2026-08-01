@@ -1,0 +1,55 @@
+# ===========================================================================
+# HorizontalPodAutoscaler — API.
+#
+# Scales the fastapi-starter-api Deployment between 2 and 10 replicas, targeting
+# 70% average CPU utilisation. Requires the metrics-server to be installed
+# (kubectl top must work). The Deployment defines CPU requests, which the HPA
+# uses as the utilisation baseline.
+#
+# NOTE: The API Deployment's minimum replicas (2) and the HPA's minReplicas (2)
+# agree, and the PodDisruptionBudget (pdb.yaml) keeps >=1 available during
+# voluntary disruptions.
+# ===========================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-starter-api
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-starter-api
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      # Scale in conservatively to avoid flapping.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60
+      selectPolicy: Max

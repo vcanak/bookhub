@@ -1,0 +1,26 @@
+# Patterns to ignore when building Helm packages.
+# Matches .gitignore-style globs. One pattern per line.
+.DS_Store
+# Common VCS dirs
+.git/
+.gitignore
+.bzr/
+.bzrignore
+.hg/
+.hgignore
+.svn/
+# Common backup files
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+# Various IDEs
+.project
+.idea/
+.vscode/
+*.tmproj
+# CI / docs that need not ship in the package
+ci/
+tests/
+*.md

@@ -1,0 +1,25 @@
+# ===========================================================================
+# PodDisruptionBudget — API.
+#
+# Guarantees at least 1 API pod stays available during voluntary disruptions
+# (node drains, cluster upgrades). Combined with the Deployment's rolling
+# update (maxUnavailable: 0) this keeps the service reachable during rollouts
+# and maintenance.
+# ===========================================================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fastapi-starter-api
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fastapi-starter
+      app.kubernetes.io/instance: fastapi-starter
+      app.kubernetes.io/component: api

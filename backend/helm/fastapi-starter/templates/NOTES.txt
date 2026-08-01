@@ -1,0 +1,66 @@
+{{- $fullName := include "fastapi-starter.fullname" . -}}
+Thank you for installing {{ .Chart.Name }} ({{ .Chart.Name }}-{{ .Chart.Version }}, app {{ .Chart.AppVersion }}).
+
+Release name: {{ .Release.Name }}
+Namespace:    {{ .Release.Namespace }}
+
+Workloads deployed:
+  * API     Deployment/{{ $fullName }} (FastAPI on container port 8000)
+  {{- if .Values.worker.enabled }}
+  * Worker  Deployment/{{ $fullName }}-worker (Celery worker)
+  {{- end }}
+  {{- if .Values.beat.enabled }}
+  * Beat    Deployment/{{ $fullName }}-beat (Celery beat scheduler, singleton)
+  {{- end }}
+  {{- if .Values.migrations.enabled }}
+  * Migrate Job/{{ $fullName }}-migrate (alembic upgrade head, pre-install/pre-upgrade hook)
+  {{- end }}
+
+Access the API:
+{{- if .Values.ingress.enabled }}
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+
+  Swagger UI : http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/docs
+  ReDoc      : http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/redoc
+  OpenAPI    : http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/api/v1/openapi.json
+{{- else if eq .Values.service.type "ClusterIP" }}
+  The Service is ClusterIP. Port-forward to reach it locally:
+
+    kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ $fullName }} 8000:{{ .Values.service.port }}
+
+  Then open:
+    Health  : http://127.0.0.1:8000/api/v1/health
+    Swagger : http://127.0.0.1:8000/docs
+    ReDoc   : http://127.0.0.1:8000/redoc
+    Metrics : http://127.0.0.1:8000/metrics
+{{- else }}
+  Service type is {{ .Values.service.type }}. Discover the address with:
+
+    kubectl --namespace {{ .Release.Namespace }} get svc {{ $fullName }}
+{{- end }}
+
+Health & readiness probes:
+  Liveness  : GET /api/v1/health/live
+  Readiness : GET /api/v1/health/ready   (returns 503 if Postgres or Redis is unreachable)
+
+{{- if .Values.autoscaling.enabled }}
+
+Autoscaling is ENABLED: API scales between {{ .Values.autoscaling.minReplicas }} and {{ .Values.autoscaling.maxReplicas }} replicas
+(target CPU {{ .Values.autoscaling.targetCPUUtilizationPercentage }}%). The Deployment replica count is managed by the HPA.
+{{- else }}
+
+Autoscaling is DISABLED: API runs {{ .Values.replicaCount }} static replica(s).
+{{- end }}
+
+{{- if and (not .Values.secrets.existingSecret) (eq .Values.secrets.secretKey "CHANGE_ME_insecure_dev_secret_key_minimum_32_chars_long") }}
+
+WARNING: secrets.secretKey is still the insecure default. With ENVIRONMENT=production the
+app WILL REFUSE TO START. Set a strong value:
+
+  helm upgrade {{ .Release.Name }} <chart> \
+    --set secrets.secretKey=$(python -c 'import secrets; print(secrets.token_urlsafe(48))')
+{{- end }}
+
+External dependencies (provided via values, NOT bundled subcharts):
+  PostgreSQL : {{ .Values.postgres.host }}:{{ .Values.postgres.port }} (db: {{ .Values.postgres.db }}, user: {{ .Values.postgres.user }})
+  Redis      : {{ .Values.redis.host }}:{{ .Values.redis.port }}

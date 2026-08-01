@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-starter-config
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: config
+    app.kubernetes.io/part-of: fastapi-starter
+# ---------------------------------------------------------------------------
+# Non-secret application configuration.
+# Every key here maps 1:1 to an environment variable consumed by
+# app/core/config.py (Settings is case_sensitive=True). Secret values
+# (SECRET_KEY, POSTGRES_PASSWORD, POSTGRES_USER) live in secret.yaml instead.
+# ---------------------------------------------------------------------------
+data:
+  # --- Application ---------------------------------------------------------
+  PROJECT_NAME: "FastAPI Starter"
+  VERSION: "0.1.0"
+  DESCRIPTION: "Production-grade FastAPI starter."
+  API_V1_PREFIX: "/api/v1"
+  ENVIRONMENT: "production"
+  DEBUG: "false"
+
+  # --- Logging -------------------------------------------------------------
+  LOG_LEVEL: "INFO"
+  LOG_JSON: "true"
+
+  # --- Security / JWT ------------------------------------------------------
+  ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  REFRESH_TOKEN_EXPIRE_DAYS: "7"
+
+  # --- CORS ----------------------------------------------------------------
+  # Comma-separated list (parsed by BACKEND_CORS_ORIGINS validator).
+  BACKEND_CORS_ORIGINS: "https://fastapi.example.com"
+
+  # --- Database ------------------------------------------------------------
+  # POSTGRES_SERVER matches the headless Service name in postgres.yaml.
+  POSTGRES_SERVER: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "app"
+  DB_POOL_SIZE: "10"
+  DB_MAX_OVERFLOW: "20"
+  DB_POOL_PRE_PING: "true"
+  DB_ECHO: "false"
+
+  # --- Redis ---------------------------------------------------------------
+  # REDIS_HOST matches the Service name in redis.yaml.
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+
+  # --- Celery --------------------------------------------------------------
+  # If unset, the app derives broker/backend from REDIS_URL. Pinned explicitly
+  # here so workers and beat share an identical, unambiguous configuration.
+  CELERY_BROKER_URL: "redis://redis:6379/0"
+  CELERY_RESULT_BACKEND: "redis://redis:6379/0"
+
+  # --- Rate limiting -------------------------------------------------------
+  RATE_LIMIT_ENABLED: "true"
+  RATE_LIMIT_DEFAULT: "200/minute"
+
+  # --- Observability -------------------------------------------------------
+  METRICS_ENABLED: "true"

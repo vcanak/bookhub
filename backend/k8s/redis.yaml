@@ -1,0 +1,116 @@
+# ===========================================================================
+# Redis — Deployment + ClusterIP Service.
+#
+# Uses redis:7-alpine. The Service is named "redis" to match REDIS_HOST in the
+# application ConfigMap and the CELERY_BROKER_URL / CELERY_RESULT_BACKEND
+# (redis://redis:6379/0). This single-replica, in-memory cache/broker is fine
+# for dev/demo; for production prefer a managed Redis or a replicated setup.
+# ===========================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: cache
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  replicas: 1
+  # Redis here is an ephemeral broker/cache; recreate to avoid two pods racing
+  # for the same role.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/instance: fastapi-starter
+      app.kubernetes.io/component: cache
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/instance: fastapi-starter
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: fastapi-starter
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 256mb
+            - --maxmemory-policy
+            - allkeys-lru
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 320Mi
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,120 @@
+# ===========================================================================
+# Database migrations — Job (run once per release).
+#
+# Runs:  alembic upgrade head   (async Alembic; uses SQLALCHEMY_DATABASE_URI
+#        derived from the POSTGRES_* env vars in the ConfigMap + Secret).
+# Overrides the image's default gunicorn CMD via `command`.
+#
+# For raw kubectl this is a one-shot Job: apply it (or re-apply with a fresh
+# name / `kubectl delete job` first) on every deploy BEFORE rolling the API.
+#
+# If you template this with Helm, annotate it as a pre-upgrade/pre-install hook
+# so it runs automatically before the workloads are updated, e.g.:
+#   metadata.annotations:
+#     "helm.sh/hook": pre-install,pre-upgrade
+#     "helm.sh/hook-weight": "-5"
+#     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+# (The dedicated Helm chart under helm/ already wires this up.)
+# ===========================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: fastapi-starter-migrate
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: fastapi-starter
+spec:
+  backoffLimit: 3
+  # Auto-clean the Job 5 minutes after it succeeds (requires TTL controller).
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fastapi-starter
+        app.kubernetes.io/instance: fastapi-starter
+        app.kubernetes.io/component: migration
+        app.kubernetes.io/part-of: fastapi-starter
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      # Wait for Postgres before attempting migrations.
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for postgres at ${POSTGRES_SERVER}:${POSTGRES_PORT}..."
+              until pg_isready -h "$POSTGRES_SERVER" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; do
+                echo "postgres not ready yet; sleeping 2s"
+                sleep 2
+              done
+              echo "postgres is ready."
+          env:
+            - name: POSTGRES_SERVER
+              valueFrom:
+                configMapKeyRef:
+                  name: fastapi-starter-config
+                  key: POSTGRES_SERVER
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: fastapi-starter-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: fastapi-starter-secret
+                  key: POSTGRES_USER
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      containers:
+        - name: migrate
+          image: ghcr.io/your-org/fastapi-starter:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - alembic
+            - upgrade
+            - head
+          envFrom:
+            - configMapRef:
+                name: fastapi-starter-config
+            - secretRef:
+                name: fastapi-starter-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

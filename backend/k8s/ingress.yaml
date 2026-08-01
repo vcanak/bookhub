@@ -1,0 +1,45 @@
+# ===========================================================================
+# Ingress — NGINX Ingress Controller.
+#
+# Routes external HTTP(S) traffic for host fastapi.example.com to the API
+# ClusterIP Service (fastapi-starter-api:80 -> container :8000).
+#
+# Requires the ingress-nginx controller to be installed in the cluster
+# (ingressClassName: nginx). TLS is templated below but commented out — wire
+# it up with cert-manager (uncomment the annotation + tls block) or supply
+# your own certificate Secret.
+# ===========================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fastapi-starter-api
+  namespace: fastapi-starter
+  labels:
+    app.kubernetes.io/name: fastapi-starter
+    app.kubernetes.io/instance: fastapi-starter
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: fastapi-starter
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    # --- TLS via cert-manager (uncomment after installing cert-manager) ------
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  # --- TLS (templated — uncomment and supply/automate the certificate) -------
+  # tls:
+  #   - hosts:
+  #       - fastapi.example.com
+  #     secretName: fastapi-starter-tls
+  rules:
+    - host: fastapi.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fastapi-starter-api
+                port:
+                  number: 80
